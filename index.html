@@ -77,10 +77,10 @@ label.chk input { accent-color: var(--accent); }
     <section>
       <h2>Dentro de las gafas</h2>
       <ul class="keys">
-        <li><b>Gatillo</b> o <b>pellizco</b>: empuja las partículas.</li>
+        <li><b>Gatillo</b> o <b>pellizco</b>: empuja las partículas. Si mueves la mano, las arrastras contigo.</li>
         <li><b>Agarre</b>: las atrae hacia tu mano.</li>
-        <li><b>Joystick arriba/abajo</b>: agranda o encoge el cubo.</li>
-        <li><b>A / X</b>: matriz aleatoria nueva. <b>B / Y</b>: recolocar partículas.</li>
+        <li><b>Joystick arriba/abajo</b>: agranda o encoge el cubo. <b>Pulsar el joystick</b>: silencia o activa la música.</li>
+        <li><b>A / X</b>: matriz aleatoria nueva y cambio de tonalidad. <b>B / Y</b>: recolocar partículas.</li>
       </ul>
     </section>
 
@@ -100,6 +100,20 @@ label.chk input { accent-color: var(--accent); }
         <button id="bChase">Persecución</button>
         <button id="bMutate">Mutar</button>
       </div>
+    </section>
+
+    <section class="sliders">
+      <h2>Música</h2>
+      <p>Cada color es una voz de una escala pentatónica. El fondo sube con la actividad de cada especie; las notas salen de las partículas que tienes cerca, en su posición en el espacio. Tus manos suenan al empujar.</p>
+      <label class="chk"><input type="checkbox" id="cMusic" checked> Música activada</label>
+      <div class="sl"><span>Volumen</span><output id="oVol"></output><input id="sVol" type="range" min="0" max="1" step="0.01"></div>
+      <div class="sl"><span>Tempo</span><output id="oBpm"></output><input id="sBpm" type="range" min="50" max="160" step="1"></div>
+    </section>
+
+    <section class="sliders">
+      <h2>Manos</h2>
+      <div class="sl"><span>Fuerza de las manos</span><output id="oHand"></output><input id="sHand" type="range" min="0.2" max="4" step="0.1"></div>
+      <div class="sl"><span>Radio de las manos</span><output id="oHandR"></output><input id="sHandR" type="range" min="0.15" max="1" step="0.05"></div>
     </section>
 
     <section class="sliders">
@@ -127,6 +141,7 @@ label.chk input { accent-color: var(--accent); }
 <!-- Física en un Web Worker para no robarle tiempo al render de las gafas -->
 <script id="workerSrc" type="text/plain">
 let n = 0, x, y, z, vx, vy, vz, t, M = [[0]];
+const act = new Float32Array(8), cnt = new Int32Array(8);
 const P = { rmax: 0.1, halfLife: 0.04, forceK: 10, beta: 0.3, dt: 0.02, paused: false };
 let cellStart = new Int32Array(1), cellFill = new Int32Array(1), cellIdx = new Int32Array(1), pCell = new Int32Array(1);
 function step(forces) {
@@ -162,16 +177,22 @@ function step(forces) {
           } } } }
     vx[i] = vx[i] * fric + fx * k * dt; vy[i] = vy[i] * fric + fy * k * dt; vz[i] = vz[i] * fric + fz * k * dt;
   }
-  // fuerzas de las manos: s > 0 empuja, s < 0 atrae
+  // manos: s > 0 empuja, s < 0 atrae (unidades de caja/s²); además arrastran según la velocidad de la mano
   for (const f of forces) {
-    const R2 = f.r * f.r;
+    const R2 = f.r * f.r, drag = Math.min(1, 12 * dt);
     for (let i = 0; i < n; i++) {
       let dx = x[i] - f.x, dy = y[i] - f.y, dz = z[i] - f.z;
       dx -= Math.round(dx); dy -= Math.round(dy); dz -= Math.round(dz);
       const d2 = dx * dx + dy * dy + dz * dz;
-      if (d2 < R2 && d2 > 1e-10) { const d = Math.sqrt(d2), a = f.s * (1 - d / f.r) / d * dt; vx[i] += dx * a; vy[i] += dy * a; vz[i] += dz * a; }
+      if (d2 < R2 && d2 > 1e-10) {
+        const d = Math.sqrt(d2), w = 1 - d / f.r, a = f.s * w / d * dt, c = drag * w;
+        vx[i] += dx * a + (f.vx - vx[i]) * c; vy[i] += dy * a + (f.vy - vy[i]) * c; vz[i] += dz * a + (f.vz - vz[i]) * c;
+      }
     }
   }
+  act.fill(0); cnt.fill(0);
+  for (let i = 0; i < n; i++) { const ti = t[i]; act[ti] += Math.sqrt(vx[i] * vx[i] + vy[i] * vy[i] + vz[i] * vz[i]); cnt[ti]++; }
+  for (let k = 0; k < 8; k++) act[k] = cnt[k] ? act[k] / cnt[k] : 0;
   for (let i = 0; i < n; i++) {
     let a = x[i] + vx[i] * dt; x[i] = a - Math.floor(a);
     a = y[i] + vy[i] * dt; y[i] = a - Math.floor(a);
@@ -189,7 +210,7 @@ onmessage = e => {
     if (!P.paused && n) step(m.forces || []);
     const out = m.buf;
     if (out.length === n * 3) for (let i = 0, k = 0; i < n; i++, k += 3) { out[k] = x[i]; out[k + 1] = y[i]; out[k + 2] = z[i]; }
-    postMessage({ buf: out, ms: performance.now() - t0, n }, [out.buffer]);
+    postMessage({ buf: out, ms: performance.now() - t0, n, act: Array.from(act) }, [out.buffer]);
   }
 };
 </script>
@@ -204,7 +225,7 @@ const $ = id => document.getElementById(id);
 const COLORS = ["#ff5d73", "#ffb547", "#f4e04d", "#5fe08a", "#4fd1d9", "#5b8cff", "#b37bff", "#ff7ad9"];
 const RGB = COLORS.map(h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255));
 const S = { types: 6, n: 3000, rmax: 0.1, halfLife: 0.04, forceK: 10, beta: 0.3, paused: false,
-            L: 3, pt: 1, fog: 0.16, images: true, box: true };
+            L: 3, pt: 1, fog: 0.16, images: true, box: true, music: true, vol: 0.6, bpm: 96, handK: 1.5, handR: 0.4 };
 const CENTER = new THREE.Vector3(0, 1.5, 0);
 let M = [], sel = [0, 0], types = new Uint8Array(0);
 
@@ -353,10 +374,145 @@ function retype() {
   paintColors(); worker.postMessage({ type: "types", t: types.slice() });
 }
 worker.onmessage = e => {
-  const { buf, ms, n } = e.data; waiting = false; physMs = physMs * 0.9 + ms * 0.1;
+  const { buf, ms, n, act } = e.data; waiting = false; physMs = physMs * 0.9 + ms * 0.1;
+  if (act) audio.activity(act);
   if (n === S.n && buf.length === iOffset.array.length) { iOffset.array.set(buf); iOffset.needsUpdate = true; pOffset.needsUpdate = true; }
   spare = buf.length === S.n * 3 ? buf : new Float32Array(S.n * 3);
 };
+
+// ---------- música interactiva (Web Audio, espacial) ----------
+const audio = (() => {
+  const SCALE = [0, 3, 5, 7, 10];               // pentatónica menor
+  const ROOTS = [57, 60, 62, 53, 55, 58];        // La, Do, Re, Fa, Sol, Si♭
+  let ctx = null, master, comp, wet, conv, padBus, padLP, padVoices = [], handVoices = [];
+  let root = ROOTS[0], nextTick = 0, voices = 0, ref = 0.05, glob = 0, lvl = new Float32Array(8);
+  const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+  const noteFor = (type, oct) => root + SCALE[type % 5] + 12 * (Math.floor(type / 5) + oct);
+  function impulse(sec) {
+    const len = Math.floor(ctx.sampleRate * sec), b = ctx.createBuffer(2, len, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) { const d = b.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3); }
+    return b;
+  }
+  function panner(pos) {
+    const p = ctx.createPanner();
+    p.panningModel = "HRTF"; p.distanceModel = "inverse"; p.refDistance = 0.4; p.maxDistance = 12; p.rolloffFactor = 1.1;
+    if (p.positionX) { p.positionX.value = pos.x; p.positionY.value = pos.y; p.positionZ.value = pos.z; } else p.setPosition(pos.x, pos.y, pos.z);
+    return p;
+  }
+  function ensure() {
+    if (ctx) { if (ctx.state === "suspended") ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    ctx = new AC();
+    comp = ctx.createDynamicsCompressor(); comp.threshold.value = -18; comp.ratio.value = 4; comp.connect(ctx.destination);
+    master = ctx.createGain(); master.gain.value = S.music ? S.vol : 0; master.connect(comp);
+    conv = ctx.createConvolver(); conv.buffer = impulse(3.2);
+    wet = ctx.createGain(); wet.gain.value = 0.45; wet.connect(conv); conv.connect(master);
+    padLP = ctx.createBiquadFilter(); padLP.type = "lowpass"; padLP.frequency.value = 600; padLP.Q.value = 0.7;
+    padBus = ctx.createGain(); padBus.gain.value = 0.5; padLP.connect(padBus); padBus.connect(master); padBus.connect(wet);
+    for (let i = 0; i < 8; i++) {
+      const g = ctx.createGain(); g.gain.value = 0; g.connect(padLP);
+      const o1 = ctx.createOscillator(), o2 = ctx.createOscillator();
+      o1.type = "sine"; o2.type = "triangle"; o2.detune.value = 7;
+      const f = mtof(noteFor(i, -2)); o1.frequency.value = f; o2.frequency.value = f;
+      const g2 = ctx.createGain(); g2.gain.value = 0.35; o2.connect(g2); g2.connect(g); o1.connect(g);
+      o1.start(); o2.start();
+      padVoices.push({ g, o1, o2, i });
+    }
+    for (let h = 0; h < 2; h++) {
+      const src = ctx.createBufferSource(); src.buffer = impulse(2); src.loop = true;
+      const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.Q.value = 6; bp.frequency.value = 800;
+      const g = ctx.createGain(); g.gain.value = 0;
+      const p = panner(new THREE.Vector3());
+      src.connect(bp); bp.connect(g); g.connect(p); p.connect(master); g.connect(wet);
+      src.start();
+      handVoices.push({ bp, g, p });
+    }
+    nextTick = ctx.currentTime + 0.1;
+  }
+  function setVol() { if (ctx) master.gain.setTargetAtTime(S.music ? S.vol : 0, ctx.currentTime, 0.1); }
+  function setOn(on) { S.music = on; setVol(); }
+  function retunePads() {
+    if (!ctx) return;
+    for (const v of padVoices) { const f = mtof(noteFor(v.i, -2)); v.o1.frequency.setTargetAtTime(f, ctx.currentTime, 0.4); v.o2.frequency.setTargetAtTime(f, ctx.currentTime, 0.4); }
+  }
+  function newKey() { let r; do { r = ROOTS[(Math.random() * ROOTS.length) | 0]; } while (r === root); root = r; retunePads(); }
+  function pluck(midi, pos, vel, when) {
+    if (!ctx || voices > 28) return;
+    voices++;
+    const t0 = Math.max(when, ctx.currentTime), f = mtof(midi);
+    const o = ctx.createOscillator(), o2 = ctx.createOscillator(), g = ctx.createGain(), lp = ctx.createBiquadFilter();
+    o.type = "triangle"; o.frequency.value = f; o2.type = "sine"; o2.frequency.value = 2 * f;
+    lp.type = "lowpass"; lp.frequency.setValueAtTime(1200 + 4000 * vel, t0); lp.frequency.exponentialRampToValueAtTime(400, t0 + 1.2);
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.22 * vel + 0.02, t0 + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.6);
+    const g2 = ctx.createGain(); g2.gain.value = 0.25;
+    o.connect(lp); o2.connect(g2); g2.connect(lp); lp.connect(g);
+    const p = panner(pos); g.connect(p); p.connect(master); g.connect(wet);
+    o.start(t0); o2.start(t0); o.stop(t0 + 1.7); o2.stop(t0 + 1.7);
+    o.onended = () => { voices--; try { p.disconnect(); } catch (e) {} };
+  }
+  function strum(c, dir) {
+    ensure(); if (!ctx || !c.userData.pos) return;
+    const base = root + (dir > 0 ? 12 : 0), pos = c.userData.pos.clone();
+    [0, 7, 12, 19].forEach((iv, k) => pluck(base + iv, pos, 0.7, ctx.currentTime + k * 0.045 * (dir > 0 ? 1 : 1.6)));
+  }
+  function activity(a) {
+    let m = 0; for (let i = 0; i < S.types; i++) m += a[i]; m /= Math.max(1, S.types);
+    ref = ref * 0.995 + m * 0.005;                      // referencia lenta (~5 s)
+    glob = Math.min(1, m / (ref * 1.6 + 1e-6));
+    for (let i = 0; i < 8; i++) lvl[i] = i < S.types ? Math.min(1, a[i] / (ref * 1.6 + 1e-6)) : 0;
+  }
+  const L = new THREE.Vector3(), Q = new THREE.Quaternion(), F = new THREE.Vector3(), U = new THREE.Vector3(), SC = new THREE.Vector3();
+  function update(cam) {
+    if (!ctx || ctx.state !== "running") return;
+    const now = ctx.currentTime;
+    cam.matrixWorld.decompose(L, Q, SC);
+    F.set(0, 0, -1).applyQuaternion(Q); U.set(0, 1, 0).applyQuaternion(Q);
+    const li = ctx.listener;
+    if (li.positionX) {
+      li.positionX.setTargetAtTime(L.x, now, 0.02); li.positionY.setTargetAtTime(L.y, now, 0.02); li.positionZ.setTargetAtTime(L.z, now, 0.02);
+      li.forwardX.setTargetAtTime(F.x, now, 0.02); li.forwardY.setTargetAtTime(F.y, now, 0.02); li.forwardZ.setTargetAtTime(F.z, now, 0.02);
+      li.upX.setTargetAtTime(U.x, now, 0.02); li.upY.setTargetAtTime(U.y, now, 0.02); li.upZ.setTargetAtTime(U.z, now, 0.02);
+    } else { li.setPosition(L.x, L.y, L.z); li.setOrientation(F.x, F.y, F.z, U.x, U.y, U.z); }
+    // fondo: cada especie suena según su actividad; el filtro se abre con la actividad global
+    for (const v of padVoices) v.g.gain.setTargetAtTime(v.i < S.types ? 0.012 + 0.05 * lvl[v.i] : 0, now, 0.5);
+    padLP.frequency.setTargetAtTime(350 + 2600 * glob * glob, now, 0.4);
+    // manos: soplo filtrado que sigue a la mano y a su velocidad
+    ctrls.forEach((c, h) => {
+      const u = c.userData, hv = handVoices[h]; if (!hv || !u.pos) return;
+      const on = renderer.xr.isPresenting && (u.sel || u.sq), sp = u.vel ? u.vel.length() : 0;
+      hv.g.gain.setTargetAtTime(on ? 0.05 + Math.min(0.35, sp * 0.18) : 0, now, 0.05);
+      hv.bp.frequency.setTargetAtTime((u.sel ? 700 : 260) * (1 + Math.min(3, sp)), now, 0.05);
+      const p = hv.p;
+      if (p.positionX) { p.positionX.setTargetAtTime(u.pos.x, now, 0.02); p.positionY.setTargetAtTime(u.pos.y, now, 0.02); p.positionZ.setTargetAtTime(u.pos.z, now, 0.02); }
+      else p.setPosition(u.pos.x, u.pos.y, u.pos.z);
+    });
+    // notas: en cada corchea, alguna partícula cercana canta desde su posición
+    const step8 = 30 / S.bpm;
+    while (nextTick < now + 0.12) {
+      if (nextTick < now - 0.2) nextTick = now;
+      tick(nextTick);
+      nextTick += step8;
+    }
+  }
+  function tick(when) {
+    const n = S.n, a = iOffset && iOffset.array; if (!a || !n) return;
+    const lu = L.clone().sub(CENTER).divideScalar(S.L).addScalar(0.5);
+    const R = 1.0 / S.L, R2 = R * R;
+    const k = Math.random() < 0.3 + 0.65 * glob ? (glob > 0.75 ? 2 : 1) : 0;
+    let played = 0;
+    for (let tries = 0; tries < 400 && played < k; tries++) {
+      const i = (Math.random() * n) | 0;
+      let dx = a[3 * i] - lu.x, dy = a[3 * i + 1] - lu.y, dz = a[3 * i + 2] - lu.z;
+      dx -= Math.round(dx); dy -= Math.round(dy); dz -= Math.round(dz);
+      const d2 = dx * dx + dy * dy + dz * dz; if (d2 > R2) continue;
+      const d = Math.sqrt(d2) / R, ty = types[i];
+      const pos = new THREE.Vector3(L.x + dx * S.L, L.y + dy * S.L, L.z + dz * S.L);
+      pluck(noteFor(ty, d < 0.45 ? 1 : 0), pos, (1 - d) * (0.4 + 0.6 * lvl[ty]), when);
+      played++;
+    }
+  }
+  return { ensure, setVol, setOn, newKey, strum, activity, update };
+})();
 
 // ---------- XR: mandos y manos ----------
 const cmf = new XRControllerModelFactory(), hmf = new XRHandModelFactory();
@@ -364,12 +520,12 @@ const ctrls = [];
 const ringGeo = new THREE.SphereGeometry(1, 16, 12);
 for (let i = 0; i < 2; i++) {
   const c = renderer.xr.getController(i);
-  c.userData = { sel: false, sq: false, src: null, prevA: false, prevB: false };
+  c.userData = { sel: false, sq: false, src: null, prevA: false, prevB: false, prevS: false };
   c.addEventListener("connected", e => { c.userData.src = e.data; });
   c.addEventListener("disconnected", () => { c.userData.src = null; });
-  c.addEventListener("selectstart", () => { c.userData.sel = true; });
+  c.addEventListener("selectstart", () => { c.userData.sel = true; audio.strum(c, 1); });
   c.addEventListener("selectend", () => { c.userData.sel = false; });
-  c.addEventListener("squeezestart", () => { c.userData.sq = true; });
+  c.addEventListener("squeezestart", () => { c.userData.sq = true; audio.strum(c, -1); });
   c.addEventListener("squeezeend", () => { c.userData.sq = false; });
   const halo = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0x7cc4ff, wireframe: true, transparent: true, opacity: 0.25 }));
   halo.visible = false; c.add(halo); c.userData.halo = halo;
@@ -378,17 +534,31 @@ for (let i = 0; i < 2; i++) {
   const hand = renderer.xr.getHand(i); hand.add(hmf.createHandModel(hand, "mesh")); scene.add(hand);
   ctrls.push(c);
 }
-const HAND_R = 0.3; // metros
 const tmp = new THREE.Vector3();
+// sigue la posición y la velocidad de cada mano (m/s, suavizada)
+function trackHands(dt) {
+  for (const c of ctrls) {
+    const u = c.userData;
+    c.getWorldPosition(tmp);
+    if (!u.pos) { u.pos = tmp.clone(); u.vel = new THREE.Vector3(); }
+    if (dt > 0) { const v = tmp.clone().sub(u.pos).divideScalar(dt); u.vel.lerp(v, 0.35); }
+    u.pos.copy(tmp);
+    const gp = u.src && u.src.gamepad;
+    u.trig = gp && gp.buttons[0] ? Math.max(0.35, gp.buttons[0].value) : 1;
+    u.grip = gp && gp.buttons[1] ? Math.max(0.35, gp.buttons[1].value) : 1;
+  }
+}
 function handForces() {
   const out = [];
   if (!renderer.xr.isPresenting) return out;
   for (const c of ctrls) {
-    const on = c.userData.sel || c.userData.sq;
-    c.userData.halo.visible = on; c.userData.halo.scale.setScalar(HAND_R);
-    if (!on) continue;
-    c.getWorldPosition(tmp); tmp.sub(CENTER).divideScalar(S.L).addScalar(0.5);
-    out.push({ x: tmp.x - Math.floor(tmp.x), y: tmp.y - Math.floor(tmp.y), z: tmp.z - Math.floor(tmp.z), r: HAND_R / S.L, s: (c.userData.sel ? 1 : -1) * 3 });
+    const u = c.userData, on = u.sel || u.sq;
+    u.halo.visible = on; u.halo.scale.setScalar(S.handR);
+    if (!on || !u.pos) continue;
+    tmp.copy(u.pos).sub(CENTER).divideScalar(S.L).addScalar(0.5);
+    const push = u.sel ? 30 * S.handK * u.trig : -20 * S.handK * u.grip; // m/s²
+    out.push({ x: tmp.x - Math.floor(tmp.x), y: tmp.y - Math.floor(tmp.y), z: tmp.z - Math.floor(tmp.z), r: S.handR / S.L,
+               s: push / S.L, vx: u.vel.x / S.L, vy: u.vel.y / S.L, vz: u.vel.z / S.L });
   }
   return out;
 }
@@ -396,9 +566,11 @@ function gamepads(dt) {
   for (const c of ctrls) {
     const gp = c.userData.src && c.userData.src.gamepad; if (!gp) continue;
     const a = gp.buttons[4] && gp.buttons[4].pressed, b = gp.buttons[5] && gp.buttons[5].pressed;
-    if (a && !c.userData.prevA) { presets.random(); sendMatrix(); paintMatrix(); }
+    const st = gp.buttons[3] && gp.buttons[3].pressed;
+    if (a && !c.userData.prevA) { presets.random(); sendMatrix(); paintMatrix(); audio.newKey(); }
     if (b && !c.userData.prevB) spawn();
-    c.userData.prevA = a; c.userData.prevB = b;
+    if (st && !c.userData.prevS) { S.music = !S.music; $("cMusic").checked = S.music; audio.setOn(S.music); }
+    c.userData.prevA = a; c.userData.prevB = b; c.userData.prevS = st;
     const ay = gp.axes.length > 3 ? gp.axes[3] : 0;
     if (Math.abs(ay) > 0.2) { S.L = Math.max(0.5, Math.min(10, S.L * Math.exp(-ay * dt * 0.8))); applyScale(); $("sL").value = S.L; }
   }
@@ -408,6 +580,7 @@ function gamepads(dt) {
 let session = null;
 async function start(mode) {
   if (session) { session.end(); return; }
+  audio.ensure();
   const init = { optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking", "layers"] };
   try {
     session = await navigator.xr.requestSession(mode, init);
@@ -479,10 +652,16 @@ bind("sB", "oB", () => S.beta, v => { S.beta = v; sendParams(); }, v => v.toFixe
 bind("sL", "oL", () => S.L, v => { S.L = v; applyScale(); }, v => v.toFixed(1) + " m");
 bind("sP", "oP", () => S.pt, v => { S.pt = v; applyScale(); }, v => v.toFixed(1) + "×");
 bind("sFog", "oFog", () => S.fog, v => { S.fog = v; uniforms.uFog.value = v; }, v => v.toFixed(2));
+bind("sVol", "oVol", () => S.vol, v => { S.vol = v; audio.setVol(); }, v => Math.round(v * 100) + " %");
+bind("sBpm", "oBpm", () => S.bpm, v => { S.bpm = v; }, v => v + " ppm");
+bind("sHand", "oHand", () => S.handK, v => { S.handK = v; }, v => v.toFixed(1) + "×");
+bind("sHandR", "oHandR", () => S.handR, v => { S.handR = v; }, v => Math.round(v * 100) + " cm");
+$("cMusic").onchange = e => { S.music = e.target.checked; audio.ensure(); audio.setOn(S.music); };
+window.addEventListener("pointerdown", () => audio.ensure(), { once: true });
 $("cImages").onchange = e => { S.images = e.target.checked; for (const m of imageMeshes) m.visible = S.images; };
 $("cBox").onchange = e => { S.box = e.target.checked; boxLines.visible = S.box; };
 const apply = name => { presets[name](); paintMatrix(); sendMatrix(); };
-$("bRandom").onclick = () => apply("random"); $("bSym").onclick = () => apply("sym"); $("bShells").onclick = () => apply("shells");
+$("bRandom").onclick = () => { apply("random"); audio.newKey(); }; $("bSym").onclick = () => apply("sym"); $("bShells").onclick = () => apply("shells");
 $("bSnakes").onclick = () => apply("snakes"); $("bChase").onclick = () => apply("chase"); $("bMutate").onclick = () => apply("mutate");
 $("bReset").onclick = spawn;
 $("bPause").onclick = () => { S.paused = !S.paused; sendParams(); $("bPause").textContent = S.paused ? "Continuar" : "Pausa"; };
@@ -495,11 +674,12 @@ presets.random(); sendParams(); sendMatrix(); spawn(); buildMatrix(); fit();
 let lastT = performance.now(), frames = 0, fps = 0, lastHud = lastT;
 renderer.setAnimationLoop(now => {
   const dt = Math.min(0.1, (now - lastT) / 1000); lastT = now;
-  gamepads(dt);
+  gamepads(dt); trackHands(dt);
   if (!waiting && spare) { waiting = true; const b = spare; spare = null; worker.postMessage({ type: "step", buf: b, forces: handForces() }, [b.buffer]); }
   if (renderer.xr.isPresenting) { const l = renderer.xr.getBaseLayer(); if (l) uniforms.uScreenH.value = l.framebufferHeight || l.textureHeight || 1600; }
   else { controls.update(); uniforms.uScreenH.value = renderer.domElement.height; }
   renderer.render(scene, camera);
+  audio.update(renderer.xr.isPresenting ? renderer.xr.getCamera() : camera);
   frames++;
   if (now - lastHud > 500) { fps = Math.round(frames * 1000 / (now - lastHud)); frames = 0; lastHud = now; $("hud").textContent = `${S.n} partículas · ${fps} fps · física ${physMs.toFixed(1)} ms`; }
 });
