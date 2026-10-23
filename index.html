@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Particle Life VR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Hermano de Particle Life 3D: vista previa de escritorio a la izquierda, panel a la derecha. En las gafas, el cubo periódico te rodea. */
+:root {
+  --bg: #0b0d12; --panel: #141821; --line: #262c39; --fg: #e6e9f0; --muted: #8b93a7; --accent: #7cc4ff;
+  --font-ui: "Sora", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: dark;
+}
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--fg); font: 14px var(--font-ui); padding: 16px; box-sizing: border-box; }
+.app { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px; max-width: 1440px; margin: 0 auto; align-items: start; }
+@media (max-width: 860px) { .app { grid-template-columns: minmax(0, 1fr); } }
+.stage { position: relative; min-width: 0; aspect-ratio: 1; max-height: calc(100vh - 32px); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.stage canvas { display: block; width: 100% !important; height: 100% !important; touch-action: none; }
+.hud { position: absolute; left: 10px; top: 8px; z-index: 2; background: rgba(11,13,18,.75); padding: 2px 8px; border-radius: 4px; font: 12px/1.5 var(--font-data); color: var(--muted); pointer-events: none; font-variant-numeric: tabular-nums; }
+.xrbar { z-index: 2; position: absolute; left: 0; right: 0; bottom: 12px; display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.xrbar button { font: 600 14px var(--font-ui); padding: 10px 16px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #08121c; cursor: pointer; }
+.xrbar button.ghost { background: #1c2230; color: var(--fg); border-color: var(--line); }
+.xrbar button:disabled { opacity: .5; cursor: not-allowed; }
+.xrmsg { position: absolute; left: 50%; transform: translateX(-50%); bottom: 60px; text-align: center; z-index: 2; background: rgba(11,13,18,.8); border-radius: 4px; max-width: 90%; box-sizing: border-box; padding: 4px 10px !important; font-size: 12.5px; color: var(--muted); padding: 0 16px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 16px; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+h1 { font-size: 18px; font-weight: 600; margin: 0; text-wrap: balance; }
+h2 { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+ul.keys { margin: 0; padding-left: 18px; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+ul.keys b { color: var(--fg); font-weight: 600; }
+.row { display: flex; flex-wrap: wrap; gap: 6px; }
+button { font: 500 12.5px var(--font-ui); color: var(--fg); background: #1c2230; border: 1px solid var(--line); border-radius: 5px; padding: 6px 10px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button:focus-visible, input:focus-visible, .cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button.primary { background: var(--accent); color: #08121c; border-color: var(--accent); font-weight: 600; }
+.matrix { display: grid; gap: 2px; user-select: none; }
+.cell { aspect-ratio: 1; border-radius: 3px; display: grid; place-items: center; font: 10px var(--font-data); color: rgba(255,255,255,.85); cursor: ns-resize; border: 1px solid transparent; min-width: 0; }
+.cell.sel { border-color: var(--fg); }
+.dot { aspect-ratio: 1; display: grid; place-items: center; }
+.dot span { width: 60%; height: 60%; border-radius: 50%; }
+.sl { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; font-size: 12.5px; }
+.sl output { font: 12px var(--font-data); color: var(--muted); font-variant-numeric: tabular-nums; }
+.sl input { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); margin: 0; }
+.sliders { display: flex; flex-direction: column; gap: 10px; }
+label.chk { display: flex; gap: 6px; align-items: center; font-size: 12.5px; color: var(--fg); }
+label.chk input { accent-color: var(--accent); }
+.xrmsg:empty { display: none; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div class="app">
+  <div class="stage" id="stage">
+    <div class="hud" id="hud"></div>
+    <div class="xrmsg" id="xrmsg"></div>
+    <div class="xrbar">
+      <button id="bVR" disabled>Entrar en VR</button>
+      <button id="bAR" class="ghost" disabled>Realidad mixta</button>
+    </div>
+  </div>
+
+  <aside class="panel">
+    <div>
+      <h1>Particle Life VR</h1>
+      <p>Particle Life en un cubo periódico que te rodea. La vista previa te pone dentro del cubo, como en las gafas: arrastra para mirar alrededor. Ajusta la matriz aquí y entra en VR. Con las copias periódicas activadas el espacio no tiene borde en ninguna dirección.</p>
+    </div>
+
+    <section>
+      <h2>Dentro de las gafas</h2>
+      <ul class="keys">
+        <li><b>Gatillo</b> o <b>pellizco</b>: empuja las partículas.</li>
+        <li><b>Agarre</b>: las atrae hacia tu mano.</li>
+        <li><b>Joystick arriba/abajo</b>: agranda o encoge el cubo.</li>
+        <li><b>A / X</b>: matriz aleatoria nueva. <b>B / Y</b>: recolocar partículas.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Matriz de atracción</h2>
+      <div class="matrix" id="matrix"></div>
+      <p style="margin-top:6px">Fila = quien siente la fuerza · columna = quien la provoca. Rueda o arrastre vertical sobre una celda para ajustar.</p>
+    </section>
+
+    <section>
+      <h2>Matrices de ejemplo</h2>
+      <div class="row">
+        <button class="primary" id="bRandom">Aleatoria</button>
+        <button id="bSym">Simétrica</button>
+        <button id="bShells">Cáscaras</button>
+        <button id="bSnakes">Filamentos</button>
+        <button id="bChase">Persecución</button>
+        <button id="bMutate">Mutar</button>
+      </div>
+    </section>
+
+    <section class="sliders">
+      <h2>Escena</h2>
+      <label class="chk"><input type="checkbox" id="cImages" checked> Copias periódicas (espacio sin borde)</label>
+      <label class="chk"><input type="checkbox" id="cBox" checked> Mostrar el cubo</label>
+      <div class="sl"><span>Lado del cubo</span><output id="oL"></output><input id="sL" type="range" min="0.5" max="10" step="0.1"></div>
+      <div class="sl"><span>Tamaño de partícula</span><output id="oP"></output><input id="sP" type="range" min="0.3" max="3" step="0.1"></div>
+      <div class="sl"><span>Niebla</span><output id="oFog"></output><input id="sFog" type="range" min="0" max="0.6" step="0.01"></div>
+    </section>
+
+    <section class="sliders">
+      <h2>Física</h2>
+      <div class="sl"><span>Colores</span><output id="oTypes"></output><input id="sTypes" type="range" min="1" max="8" step="1"></div>
+      <div class="sl"><span>Partículas</span><output id="oN"></output><input id="sN" type="range" min="500" max="8000" step="250"></div>
+      <div class="sl"><span>Radio de interacción</span><output id="oR"></output><input id="sR" type="range" min="0.05" max="0.25" step="0.005"></div>
+      <div class="sl"><span>Fricción (vida media, s)</span><output id="oF"></output><input id="sF" type="range" min="0.005" max="0.2" step="0.005"></div>
+      <div class="sl"><span>Intensidad de fuerza</span><output id="oK"></output><input id="sK" type="range" min="1" max="30" step="0.5"></div>
+      <div class="sl"><span>β (repulsión cercana)</span><output id="oB"></output><input id="sB" type="range" min="0.05" max="0.6" step="0.01"></div>
+      <div class="row"><button id="bPause">Pausa</button><button id="bReset">Recolocar partículas</button></div>
+    </section>
+  </aside>
+</div>
+
+<!-- Física en un Web Worker para no robarle tiempo al render de las gafas -->
+<script id="workerSrc" type="text/plain">
+let n = 0, x, y, z, vx, vy, vz, t, M = [[0]];
+const P = { rmax: 0.1, halfLife: 0.04, forceK: 10, beta: 0.3, dt: 0.02, paused: false };
+let cellStart = new Int32Array(1), cellFill = new Int32Array(1), cellIdx = new Int32Array(1), pCell = new Int32Array(1);
+function step(forces) {
+  const rmax = P.rmax, beta = P.beta, dt = P.dt;
+  const G = Math.max(3, Math.floor(1 / rmax)), G2 = G * G, G3 = G2 * G;
+  if (cellStart.length !== G3 + 1) { cellStart = new Int32Array(G3 + 1); cellFill = new Int32Array(G3); }
+  if (cellIdx.length !== n) { cellIdx = new Int32Array(n); pCell = new Int32Array(n); }
+  cellStart.fill(0);
+  for (let i = 0; i < n; i++) { const c = ((z[i] * G | 0) % G) * G2 + ((y[i] * G | 0) % G) * G + ((x[i] * G | 0) % G); pCell[i] = c; cellStart[c + 1]++; }
+  for (let c = 0; c < G3; c++) cellStart[c + 1] += cellStart[c];
+  cellFill.set(cellStart.subarray(0, G3));
+  for (let i = 0; i < n; i++) cellIdx[cellFill[pCell[i]]++] = i;
+  const fric = Math.pow(0.5, dt / P.halfLife), k = rmax * P.forceK, r2max = rmax * rmax, invR = 1 / rmax, ib = 1 / beta, ob = 1 / (1 - beta);
+  for (let i = 0; i < n; i++) {
+    const xi = x[i], yi = y[i], zi = z[i], row = M[t[i]];
+    const pc = pCell[i], cx = pc % G, cy = ((pc / G) | 0) % G, cz = (pc / G2) | 0;
+    let fx = 0, fy = 0, fz = 0;
+    for (let oz = -1; oz <= 1; oz++) { const rz = ((cz + oz + G) % G) * G2;
+      for (let oy = -1; oy <= 1; oy++) { const ry = rz + ((cy + oy + G) % G) * G;
+        for (let ox = -1; ox <= 1; ox++) { const c = ry + (cx + ox + G) % G;
+          for (let p = cellStart[c], e = cellStart[c + 1]; p < e; p++) {
+            const j = cellIdx[p]; if (j === i) continue;
+            let dx = x[j] - xi, dy = y[j] - yi, dz = z[j] - zi;
+            if (dx > 0.5) dx -= 1; else if (dx < -0.5) dx += 1;
+            if (dy > 0.5) dy -= 1; else if (dy < -0.5) dy += 1;
+            if (dz > 0.5) dz -= 1; else if (dz < -0.5) dz += 1;
+            const d2 = dx * dx + dy * dy + dz * dz;
+            if (d2 > 0 && d2 < r2max) {
+              const r = Math.sqrt(d2), q = r * invR;
+              const f = q < beta ? q * ib - 1 : row[t[j]] * (1 - Math.abs(2 * q - 1 - beta) * ob);
+              const g = f / r; fx += dx * g; fy += dy * g; fz += dz * g;
+            }
+          } } } }
+    vx[i] = vx[i] * fric + fx * k * dt; vy[i] = vy[i] * fric + fy * k * dt; vz[i] = vz[i] * fric + fz * k * dt;
+  }
+  // fuerzas de las manos: s > 0 empuja, s < 0 atrae
+  for (const f of forces) {
+    const R2 = f.r * f.r;
+    for (let i = 0; i < n; i++) {
+      let dx = x[i] - f.x, dy = y[i] - f.y, dz = z[i] - f.z;
+      dx -= Math.round(dx); dy -= Math.round(dy); dz -= Math.round(dz);
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 < R2 && d2 > 1e-10) { const d = Math.sqrt(d2), a = f.s * (1 - d / f.r) / d * dt; vx[i] += dx * a; vy[i] += dy * a; vz[i] += dz * a; }
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    let a = x[i] + vx[i] * dt; x[i] = a - Math.floor(a);
+    a = y[i] + vy[i] * dt; y[i] = a - Math.floor(a);
+    a = z[i] + vz[i] * dt; z[i] = a - Math.floor(a);
+  }
+}
+onmessage = e => {
+  const m = e.data;
+  if (m.type === "reset") { n = m.n; x = m.x; y = m.y; z = m.z; t = m.t; vx = new Float32Array(n); vy = new Float32Array(n); vz = new Float32Array(n); }
+  else if (m.type === "types") { t = m.t; }
+  else if (m.type === "matrix") { M = m.M; }
+  else if (m.type === "params") { Object.assign(P, m.P); }
+  else if (m.type === "step") {
+    const t0 = performance.now();
+    if (!P.paused && n) step(m.forces || []);
+    const out = m.buf;
+    if (out.length === n * 3) for (let i = 0, k = 0; i < n; i++, k += 3) { out[k] = x[i]; out[k + 1] = y[i]; out[k + 2] = z[i]; }
+    postMessage({ buf: out, ms: performance.now() - t0, n }, [out.buffer]);
+  }
+};
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
+import { XRHandModelFactory } from "three/addons/webxr/XRHandModelFactory.js";
+
+const $ = id => document.getElementById(id);
+const COLORS = ["#ff5d73", "#ffb547", "#f4e04d", "#5fe08a", "#4fd1d9", "#5b8cff", "#b37bff", "#ff7ad9"];
+const RGB = COLORS.map(h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255));
+const S = { types: 6, n: 3000, rmax: 0.1, halfLife: 0.04, forceK: 10, beta: 0.3, paused: false,
+            L: 3, pt: 1, fog: 0.16, images: true, box: true };
+const CENTER = new THREE.Vector3(0, 1.5, 0);
+let M = [], sel = [0, 0], types = new Uint8Array(0);
+
+// ---------- worker ----------
+const worker = new Worker(URL.createObjectURL(new Blob([$("workerSrc").textContent], { type: "text/javascript" })));
+let spare = null, waiting = false, physMs = 0;
+const sendParams = () => worker.postMessage({ type: "params", P: { rmax: S.rmax, halfLife: S.halfLife, forceK: S.forceK, beta: S.beta, paused: S.paused } });
+const sendMatrix = () => worker.postMessage({ type: "matrix", M });
+
+// ---------- matrices ----------
+const blank = v => Array.from({ length: S.types }, () => Array(S.types).fill(v));
+const rnd = () => +(Math.random() * 2 - 1).toFixed(2);
+const presets = {
+  random() { M = blank(0).map(r => r.map(rnd)); },
+  sym() { presets.random(); for (let i = 0; i < S.types; i++) for (let j = 0; j < i; j++) M[i][j] = M[j][i]; },
+  shells() { M = blank(-0.1); for (let i = 0; i < S.types; i++) { M[i][i] = 0.8; if (i > 0) M[i][i - 1] = 0.5; } },
+  snakes() { M = blank(0); for (let i = 0; i < S.types; i++) { M[i][i] = 1; M[i][(i + 1) % S.types] = 0.2; } },
+  chase() { M = blank(0); for (let i = 0; i < S.types; i++) { M[i][i] = 0.4; M[i][(i + 1) % S.types] = 1; M[(i + 1) % S.types][i] = S.types > 1 ? -0.6 : 0.4; } },
+  mutate() { M = M.map(r => r.map(v => +Math.max(-1, Math.min(1, v + (Math.random() - .5) * 0.3)).toFixed(2))); }
+};
+function resizeMatrix(k) {
+  const old = M;
+  M = Array.from({ length: k }, (_, i) => Array.from({ length: k }, (_, j) => old[i] && old[i][j] !== undefined ? old[i][j] : rnd()));
+  S.types = k; sel = [Math.min(sel[0], k - 1), Math.min(sel[1], k - 1)];
+}
+
+// ---------- three.js ----------
+const stage = $("stage");
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setClearColor(0x0b0d12, 1);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType("local-floor");
+renderer.xr.setFoveation(1);
+stage.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, 1, 0.02, 200);
+camera.position.set(CENTER.x + 0.8, CENTER.y + 0.25, CENTER.z + 1.2); // dentro del cubo, como en las gafas
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.copy(CENTER); controls.enableDamping = true; controls.autoRotate = true; controls.autoRotateSpeed = 0.6; controls.update();
+
+const BGc = new THREE.Color(0x0b0d12);
+const uniforms = { uRadius: { value: 0.006 * S.L }, uL: { value: S.L }, uFog: { value: S.fog }, uBg: { value: new THREE.Vector3(11 / 255, 13 / 255, 18 / 255) }, uAR: { value: 0 }, uScreenH: { value: 800 } };
+const material = new THREE.ShaderMaterial({
+  uniforms,
+  vertexShader: `
+    attribute vec3 iOffset; attribute vec3 iColor;
+    uniform float uRadius; uniform float uL;
+    varying vec3 vN; varying vec3 vC; varying float vD;
+    void main() {
+      vec3 p = position * uRadius + (iOffset - 0.5) * uL;
+      vec4 mv = modelViewMatrix * vec4(p, 1.0);
+      vN = normalize(normalMatrix * normalize(position));
+      vC = iColor; vD = length(mv.xyz);
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: `
+    uniform float uFog; uniform vec3 uBg; uniform float uAR;
+    varying vec3 vN; varying vec3 vC; varying float vD;
+    void main() {
+      float l = 0.35 + 0.75 * max(0.0, dot(normalize(vN), normalize(vec3(-0.4, 0.6, 0.7))));
+      float f = exp(-uFog * vD);
+      vec3 c = vC * l;
+      gl_FragColor = uAR > 0.5 ? vec4(c, mix(0.25, 1.0, f)) : vec4(mix(uBg, c, f), 1.0);
+    }`,
+  transparent: false
+});
+// copias periódicas como impostores (un punto por partícula): baratas para las gafas
+const pointsMat = new THREE.ShaderMaterial({
+  uniforms,
+  vertexShader: `
+    attribute vec3 iColor;
+    uniform float uRadius; uniform float uL; uniform float uScreenH;
+    varying vec3 vC; varying float vD;
+    void main() {
+      vec4 mv = modelViewMatrix * vec4((position - 0.5) * uL, 1.0);
+      gl_Position = projectionMatrix * mv;
+      vD = length(mv.xyz); vC = iColor;
+      gl_PointSize = max(1.0, 2.0 * uRadius * projectionMatrix[1][1] * 0.5 * uScreenH / max(0.02, -mv.z));
+    }`,
+  fragmentShader: `
+    uniform float uFog; uniform vec3 uBg; uniform float uAR;
+    varying vec3 vC; varying float vD;
+    void main() {
+      vec2 q = gl_PointCoord * 2.0 - 1.0; float r2 = dot(q, q); if (r2 > 1.0) discard;
+      vec3 n = vec3(q.x, -q.y, sqrt(1.0 - r2));
+      float l = 0.35 + 0.75 * max(0.0, dot(n, normalize(vec3(-0.4, 0.6, 0.7))));
+      float f = exp(-uFog * vD); vec3 c = vC * l;
+      gl_FragColor = uAR > 0.5 ? vec4(c, mix(0.25, 1.0, f)) : vec4(mix(uBg, c, f), 1.0);
+    }`
+});
+
+let iOffset = null, iColor = null, pOffset = null, pColor = null, geoMain = null, geoImg = null, meshMain = null;
+const imageMeshes = [];
+const world = new THREE.Group(); world.position.copy(CENTER); scene.add(world);
+const boxLines = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), new THREE.LineBasicMaterial({ color: 0x3d4559 }));
+world.add(boxLines);
+
+function makeInstanced(base, count) {
+  const g = new THREE.InstancedBufferGeometry();
+  g.setAttribute("position", base.getAttribute("position"));
+  if (base.index) g.setIndex(base.index);
+  g.setAttribute("iOffset", iOffset); g.setAttribute("iColor", iColor);
+  g.instanceCount = count;
+  return g;
+}
+function buildMeshes() {
+  for (const m of [meshMain, ...imageMeshes]) if (m) world.remove(m);
+  imageMeshes.length = 0;
+  if (geoMain) geoMain.dispose(); if (geoImg) geoImg.dispose();
+  iOffset = new THREE.InstancedBufferAttribute(new Float32Array(S.n * 3), 3); iOffset.setUsage(THREE.DynamicDrawUsage);
+  iColor = new THREE.InstancedBufferAttribute(new Float32Array(S.n * 3), 3);
+  geoMain = makeInstanced(new THREE.IcosahedronGeometry(1, 1), S.n);
+  pOffset = new THREE.BufferAttribute(iOffset.array, 3); pOffset.setUsage(THREE.DynamicDrawUsage);
+  pColor = new THREE.BufferAttribute(iColor.array, 3);
+  geoImg = new THREE.BufferGeometry(); geoImg.setAttribute("position", pOffset); geoImg.setAttribute("iColor", pColor);
+  meshMain = new THREE.Mesh(geoMain, material); meshMain.frustumCulled = false; world.add(meshMain);
+  for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (let k = -1; k <= 1; k++) {
+    if (!i && !j && !k) continue;
+    const m = new THREE.Points(geoImg, pointsMat); m.frustumCulled = false; m.userData.cell = [i, j, k]; m.visible = S.images;
+    world.add(m); imageMeshes.push(m);
+  }
+  applyScale();
+}
+function paintColors() { const a = iColor.array; for (let i = 0; i < S.n; i++) { const c = RGB[types[i]]; a[3 * i] = c[0]; a[3 * i + 1] = c[1]; a[3 * i + 2] = c[2]; } iColor.needsUpdate = true; pColor.needsUpdate = true; }
+function applyScale() {
+  uniforms.uL.value = S.L;
+  uniforms.uRadius.value = 0.006 * S.pt * S.L * Math.pow(3000 / S.n, 1 / 3);
+  boxLines.scale.setScalar(S.L);
+  for (const m of imageMeshes) m.position.set(m.userData.cell[0] * S.L, m.userData.cell[1] * S.L, m.userData.cell[2] * S.L);
+  $("oL").textContent = S.L.toFixed(1) + " m";
+}
+
+function spawn() {
+  const n = S.n, x = new Float32Array(n), y = new Float32Array(n), z = new Float32Array(n);
+  types = new Uint8Array(n);
+  for (let i = 0; i < n; i++) { x[i] = Math.random(); y[i] = Math.random(); z[i] = Math.random(); types[i] = (Math.random() * S.types) | 0; }
+  buildMeshes();
+  const a = iOffset.array; for (let i = 0; i < n; i++) { a[3 * i] = x[i]; a[3 * i + 1] = y[i]; a[3 * i + 2] = z[i]; }
+  iOffset.needsUpdate = true; pOffset.needsUpdate = true; paintColors();
+  worker.postMessage({ type: "reset", n, x, y, z, t: types.slice() });
+  spare = new Float32Array(n * 3);
+}
+function retype() {
+  for (let i = 0; i < S.n; i++) if (types[i] >= S.types) types[i] = (Math.random() * S.types) | 0;
+  paintColors(); worker.postMessage({ type: "types", t: types.slice() });
+}
+worker.onmessage = e => {
+  const { buf, ms, n } = e.data; waiting = false; physMs = physMs * 0.9 + ms * 0.1;
+  if (n === S.n && buf.length === iOffset.array.length) { iOffset.array.set(buf); iOffset.needsUpdate = true; pOffset.needsUpdate = true; }
+  spare = buf.length === S.n * 3 ? buf : new Float32Array(S.n * 3);
+};
+
+// ---------- XR: mandos y manos ----------
+const cmf = new XRControllerModelFactory(), hmf = new XRHandModelFactory();
+const ctrls = [];
+const ringGeo = new THREE.SphereGeometry(1, 16, 12);
+for (let i = 0; i < 2; i++) {
+  const c = renderer.xr.getController(i);
+  c.userData = { sel: false, sq: false, src: null, prevA: false, prevB: false };
+  c.addEventListener("connected", e => { c.userData.src = e.data; });
+  c.addEventListener("disconnected", () => { c.userData.src = null; });
+  c.addEventListener("selectstart", () => { c.userData.sel = true; });
+  c.addEventListener("selectend", () => { c.userData.sel = false; });
+  c.addEventListener("squeezestart", () => { c.userData.sq = true; });
+  c.addEventListener("squeezeend", () => { c.userData.sq = false; });
+  const halo = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0x7cc4ff, wireframe: true, transparent: true, opacity: 0.25 }));
+  halo.visible = false; c.add(halo); c.userData.halo = halo;
+  scene.add(c);
+  const grip = renderer.xr.getControllerGrip(i); grip.add(cmf.createControllerModel(grip)); scene.add(grip);
+  const hand = renderer.xr.getHand(i); hand.add(hmf.createHandModel(hand, "mesh")); scene.add(hand);
+  ctrls.push(c);
+}
+const HAND_R = 0.3; // metros
+const tmp = new THREE.Vector3();
+function handForces() {
+  const out = [];
+  if (!renderer.xr.isPresenting) return out;
+  for (const c of ctrls) {
+    const on = c.userData.sel || c.userData.sq;
+    c.userData.halo.visible = on; c.userData.halo.scale.setScalar(HAND_R);
+    if (!on) continue;
+    c.getWorldPosition(tmp); tmp.sub(CENTER).divideScalar(S.L).addScalar(0.5);
+    out.push({ x: tmp.x - Math.floor(tmp.x), y: tmp.y - Math.floor(tmp.y), z: tmp.z - Math.floor(tmp.z), r: HAND_R / S.L, s: (c.userData.sel ? 1 : -1) * 3 });
+  }
+  return out;
+}
+function gamepads(dt) {
+  for (const c of ctrls) {
+    const gp = c.userData.src && c.userData.src.gamepad; if (!gp) continue;
+    const a = gp.buttons[4] && gp.buttons[4].pressed, b = gp.buttons[5] && gp.buttons[5].pressed;
+    if (a && !c.userData.prevA) { presets.random(); sendMatrix(); paintMatrix(); }
+    if (b && !c.userData.prevB) spawn();
+    c.userData.prevA = a; c.userData.prevB = b;
+    const ay = gp.axes.length > 3 ? gp.axes[3] : 0;
+    if (Math.abs(ay) > 0.2) { S.L = Math.max(0.5, Math.min(10, S.L * Math.exp(-ay * dt * 0.8))); applyScale(); $("sL").value = S.L; }
+  }
+}
+
+// botones de entrada
+let session = null;
+async function start(mode) {
+  if (session) { session.end(); return; }
+  const init = { optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking", "layers"] };
+  try {
+    session = await navigator.xr.requestSession(mode, init);
+  } catch (err) { $("xrmsg").textContent = "No se pudo abrir la sesión: " + err.message; return; }
+  const ar = mode === "immersive-ar";
+  uniforms.uAR.value = ar ? 1 : 0;
+  material.transparent = ar; material.needsUpdate = true; pointsMat.transparent = ar; pointsMat.needsUpdate = true;
+  renderer.setClearColor(0x0b0d12, ar ? 0 : 1);
+  session.addEventListener("end", () => { session = null; uniforms.uAR.value = 0; material.transparent = false; material.needsUpdate = true; renderer.setClearColor(0x0b0d12, 1); $("bVR").textContent = "Entrar en VR"; $("bAR").textContent = "Realidad mixta"; });
+  await renderer.xr.setSession(session);
+  (ar ? $("bAR") : $("bVR")).textContent = "Salir";
+}
+if ("xr" in navigator) {
+  navigator.xr.isSessionSupported("immersive-vr").then(ok => { $("bVR").disabled = !ok; if (!ok) $("xrmsg").textContent = "Este navegador no ofrece VR. Abre esta página en el navegador de las Meta Quest."; });
+  navigator.xr.isSessionSupported("immersive-ar").then(ok => { $("bAR").disabled = !ok; });
+} else {
+  $("xrmsg").textContent = window.isSecureContext ? "Este navegador no tiene WebXR. Abre esta página en el navegador de las Meta Quest." : "WebXR necesita HTTPS. Sube esta página a un sitio seguro, por ejemplo GitHub Pages.";
+}
+$("bVR").onclick = () => start("immersive-vr");
+$("bAR").onclick = () => start("immersive-ar");
+
+// ---------- matriz UI ----------
+const mEl = $("matrix");
+const cellColor = v => { const a = Math.abs(v); return v >= 0 ? `rgba(79,209,139,${0.12 + a * 0.75})` : `rgba(255,107,122,${0.12 + a * 0.75})`; };
+function buildMatrix() {
+  const k = S.types;
+  mEl.style.gridTemplateColumns = `repeat(${k + 1}, minmax(0, 1fr))`;
+  mEl.innerHTML = ""; mEl.appendChild(document.createElement("div"));
+  for (let j = 0; j < k; j++) { const d = document.createElement("div"); d.className = "dot"; d.innerHTML = `<span style="background:${COLORS[j]}"></span>`; mEl.appendChild(d); }
+  for (let i = 0; i < k; i++) {
+    const d = document.createElement("div"); d.className = "dot"; d.innerHTML = `<span style="background:${COLORS[i]}"></span>`; mEl.appendChild(d);
+    for (let j = 0; j < k; j++) { const c = document.createElement("div"); c.className = "cell"; c.tabIndex = 0; c.dataset.i = i; c.dataset.j = j; c.setAttribute("role", "button"); mEl.appendChild(c); }
+  }
+  paintMatrix();
+}
+function paintMatrix() {
+  mEl.querySelectorAll(".cell").forEach(c => {
+    const i = +c.dataset.i, j = +c.dataset.j, v = M[i][j];
+    c.style.background = cellColor(v);
+    c.textContent = S.types <= 6 ? (Math.abs(v) < 0.05 ? "0.0" : v.toFixed(1)) : "";
+    c.classList.toggle("sel", i === sel[0] && j === sel[1]);
+    c.setAttribute("aria-label", `Fila ${i + 1}, columna ${j + 1}: ${v.toFixed(2)}`);
+  });
+}
+const setCell = (i, j, v) => { M[i][j] = +Math.max(-1, Math.min(1, v)).toFixed(2); sel = [i, j]; paintMatrix(); sendMatrix(); };
+let drag = null;
+mEl.addEventListener("pointerdown", e => { const c = e.target.closest(".cell"); if (!c) return; const i = +c.dataset.i, j = +c.dataset.j; sel = [i, j]; paintMatrix(); drag = { i, j, y0: e.clientY, v0: M[i][j] }; c.setPointerCapture(e.pointerId); });
+mEl.addEventListener("pointermove", e => { if (drag) setCell(drag.i, drag.j, drag.v0 + (drag.y0 - e.clientY) / 80); });
+window.addEventListener("pointerup", () => { drag = null; });
+mEl.addEventListener("wheel", e => { const c = e.target.closest(".cell"); if (!c) return; e.preventDefault(); const i = +c.dataset.i, j = +c.dataset.j; setCell(i, j, M[i][j] + (e.deltaY < 0 ? 0.1 : -0.1)); }, { passive: false });
+mEl.addEventListener("keydown", e => {
+  const c = e.target.closest(".cell"); if (!c) return; const i = +c.dataset.i, j = +c.dataset.j;
+  if (e.key === "ArrowUp" || e.key === "+") { e.preventDefault(); setCell(i, j, M[i][j] + 0.1); }
+  if (e.key === "ArrowDown" || e.key === "-") { e.preventDefault(); setCell(i, j, M[i][j] - 0.1); }
+});
+
+// ---------- controles ----------
+const bind = (sid, oid, get, apply, fmt, ev = "input") => {
+  const s = $(sid), o = $(oid); s.value = get(); o.textContent = fmt(get());
+  s.addEventListener(ev, () => { apply(+s.value); o.textContent = fmt(+s.value); });
+  if (ev !== "input") s.addEventListener("input", () => { o.textContent = fmt(+s.value); });
+};
+bind("sTypes", "oTypes", () => S.types, v => { resizeMatrix(v); retype(); buildMatrix(); sendMatrix(); }, v => v);
+bind("sN", "oN", () => S.n, v => { S.n = v; spawn(); }, v => v, "change");
+bind("sR", "oR", () => S.rmax, v => { S.rmax = v; sendParams(); }, v => v.toFixed(3));
+bind("sF", "oF", () => S.halfLife, v => { S.halfLife = v; sendParams(); }, v => v.toFixed(3));
+bind("sK", "oK", () => S.forceK, v => { S.forceK = v; sendParams(); }, v => v.toFixed(1));
+bind("sB", "oB", () => S.beta, v => { S.beta = v; sendParams(); }, v => v.toFixed(2));
+bind("sL", "oL", () => S.L, v => { S.L = v; applyScale(); }, v => v.toFixed(1) + " m");
+bind("sP", "oP", () => S.pt, v => { S.pt = v; applyScale(); }, v => v.toFixed(1) + "×");
+bind("sFog", "oFog", () => S.fog, v => { S.fog = v; uniforms.uFog.value = v; }, v => v.toFixed(2));
+$("cImages").onchange = e => { S.images = e.target.checked; for (const m of imageMeshes) m.visible = S.images; };
+$("cBox").onchange = e => { S.box = e.target.checked; boxLines.visible = S.box; };
+const apply = name => { presets[name](); paintMatrix(); sendMatrix(); };
+$("bRandom").onclick = () => apply("random"); $("bSym").onclick = () => apply("sym"); $("bShells").onclick = () => apply("shells");
+$("bSnakes").onclick = () => apply("snakes"); $("bChase").onclick = () => apply("chase"); $("bMutate").onclick = () => apply("mutate");
+$("bReset").onclick = spawn;
+$("bPause").onclick = () => { S.paused = !S.paused; sendParams(); $("bPause").textContent = S.paused ? "Continuar" : "Pausa"; };
+
+// ---------- bucle ----------
+function fit() { const r = stage.getBoundingClientRect(); renderer.setSize(r.width, r.height, false); camera.aspect = r.width / r.height; camera.updateProjectionMatrix(); }
+new ResizeObserver(() => { if (!renderer.xr.isPresenting) fit(); }).observe(stage);
+presets.random(); sendParams(); sendMatrix(); spawn(); buildMatrix(); fit();
+
+let lastT = performance.now(), frames = 0, fps = 0, lastHud = lastT;
+renderer.setAnimationLoop(now => {
+  const dt = Math.min(0.1, (now - lastT) / 1000); lastT = now;
+  gamepads(dt);
+  if (!waiting && spare) { waiting = true; const b = spare; spare = null; worker.postMessage({ type: "step", buf: b, forces: handForces() }, [b.buffer]); }
+  if (renderer.xr.isPresenting) { const l = renderer.xr.getBaseLayer(); if (l) uniforms.uScreenH.value = l.framebufferHeight || l.textureHeight || 1600; }
+  else { controls.update(); uniforms.uScreenH.value = renderer.domElement.height; }
+  renderer.render(scene, camera);
+  frames++;
+  if (now - lastHud > 500) { fps = Math.round(frames * 1000 / (now - lastHud)); frames = 0; lastHud = now; $("hud").textContent = `${S.n} partículas · ${fps} fps · física ${physMs.toFixed(1)} ms`; }
+});
+</script>
+</body>
+</html>
